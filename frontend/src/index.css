@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --gold: #D4AF37;
+  --secondary: #121212;
+}
+
+body {
+  @apply bg-secondary text-white font-sans antialiased;
+}
+
+.gold-text {
+  @apply bg-gold-gradient bg-clip-text text-transparent;
+}
+
+.btn-primary {
+  @apply bg-gold-gradient text-black font-bold py-3 px-6 rounded-lg 
+         hover:shadow-gold-glow active:scale-95 transition-all duration-300;
+}
+
+.btn-outline {
+  @apply border border-primary text-primary font-bold py-3 px-6 rounded-lg 
+         hover:bg-primary/10 transition-all duration-300;
+}
+
+.card {
+  @apply bg-secondary-light p-6 rounded-2xl border border-white/10 
+         backdrop-blur-sm shadow-xl hover:border-primary/40 transition-all duration-500;
+}
+
+.glass-morphism {
+  @apply bg-white/5 backdrop-blur-md border border-white/10;
+}
+
+.input-field {
+  @apply w-full bg-secondary-dark border border-white/10 rounded-xl p-3 
+         focus:border-primary focus:ring-1 focus:ring-primary outline-none 
+         transition-all text-white placeholder:text-gray-600;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-secondary;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-primary/20 rounded-full hover:bg-primary/40;
+}

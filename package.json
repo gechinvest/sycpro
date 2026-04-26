@@ -1,0 +1,21 @@
+{
+  "name": "smartyield-network",
+  "version": "1.0.0",
+  "description": "Professional Investment Platform with 20% Daily ROI",
+  "private": true,
+  "scripts": {
+    "backend": "cd backend && npm run dev",
+    "frontend": "cd frontend && npm run dev",
+    "dev": "concurrently \"npm run backend\" \"npm run frontend\"",
+    "install-all": "cd backend && npm install && cd ../frontend && npm install",
+    "db:push": "supabase db push",
+    "db:reset": "supabase db reset",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:status": "supabase status",
+    "start": "npm run install-all && npm run dev"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
