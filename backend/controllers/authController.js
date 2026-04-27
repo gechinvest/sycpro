@@ -191,17 +191,37 @@ exports.login = async (req, res) => {
     }
 
     // Get profile info - Use supabaseAdmin to bypass RLS since the anon client doesn't have a user session yet
-    const { data: profile, error: profileError } = await supabaseAdmin
+    let { data: profile, error: profileError } = await supabaseAdmin
       .from('profiles')
       .select('*')
       .eq('id', data.user.id)
       .single();
 
+    // If profile doesn't exist yet (trigger might be slow), create it manually
+    if (profileError && profileError.code === 'PGRST116') {
+      console.log('Profile not found for user, creating manually during login:', data.user.id);
+      const { data: newProfile, error: createError } = await supabaseAdmin
+        .from('profiles')
+        .insert({
+          id: data.user.id,
+          email: data.user.email,
+          full_name: data.user.user_metadata?.full_name || 'User',
+          phone: data.user.user_metadata?.phone || '',
+          referral_code: generateReferralCode()
+        })
+        .select()
+        .single();
+      
+      if (createError) {
+        console.error('Failed to create missing profile:', createError);
+        return res.status(500).json({ message: 'User authenticated but profile could not be created.' });
+      }
+      profile = newProfile;
+      profileError = null;
+    }
+
     if (profileError) {
       console.error('Profile Fetch Error:', profileError);
-      if (profileError.code === 'PGRST116') {
-        return res.status(404).json({ message: 'User profile not found. Please register again.' });
-      }
       return res.status(500).json({ 
         message: 'Failed to fetch user profile',
         details: profileError.message,
