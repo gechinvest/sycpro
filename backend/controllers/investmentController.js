@@ -257,11 +257,11 @@ exports.buyPlan = async (req, res) => {
           console.error('Error fetching system settings for commissions:', settingsError);
         }
 
-        const commissionRates = { 
-          1: (settings?.referral_reward_percent_l1 || 10.0) / 100, 
-          2: (settings?.referral_reward_percent_l2 || 5.0) / 100, 
-          3: (settings?.referral_reward_percent_l3 || 2.0) / 100 
-        };
+        const commissionRates = [
+          (settings?.referral_reward_percent_l1 || 10.0) / 100,
+          (settings?.referral_reward_percent_l2 || 5.0) / 100,
+          (settings?.referral_reward_percent_l3 || 2.0) / 100
+        ];
         
         console.log('Commission rates applied:', commissionRates);
         
@@ -281,7 +281,7 @@ exports.buyPlan = async (req, res) => {
           }
 
           const referrerId = currentUser.referrer_id;
-          const commissionAmount = plan.amount * commissionRates[level];
+          const commissionAmount = plan.amount * commissionRates[level - 1];
           
           console.log(`Level ${level}: Distributing ${commissionAmount} ETB to referrer ${referrerId}`);
 
@@ -326,7 +326,8 @@ exports.buyPlan = async (req, res) => {
           const { error: profitError } = await supabaseAdmin.from('profit_logs').insert({
             user_id: referrerId,
             amount: commissionAmount,
-            type: 'referral_commission'
+            type: 'referral_commission',
+            metadata: { referred_user_id: userId, level: level }
           });
           
           if (profitError) console.error('Failed to log profit record:', profitError);

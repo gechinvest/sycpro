@@ -13,6 +13,9 @@ dotenv.config();
 
 const app = express();
 
+// Trust proxy for Render/Vercel/Heroku load balancers
+app.set('trust proxy', 1);
+
 // Serve uploads static folder
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 

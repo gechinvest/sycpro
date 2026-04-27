@@ -3,7 +3,11 @@ const { supabaseAdmin } = require('../config/supabase');
 const processDailyRoi = async () => {
   console.log('Starting daily ROI processing...');
   try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
     // 1. Get all active investments that haven't reached 65 days
+    // AND haven't been paid today (last_payout_at is null or before today)
     const { data: investments, error } = await supabaseAdmin
       .from('investments')
       .select('*')
@@ -12,9 +16,16 @@ const processDailyRoi = async () => {
 
     if (error) throw error;
 
-    console.log(`Processing ${investments.length} active investments...`);
+    const pendingInvestments = investments.filter(inv => {
+      if (!inv.last_payout_at) return true;
+      const lastPayout = new Date(inv.last_payout_at);
+      lastPayout.setHours(0, 0, 0, 0);
+      return lastPayout.getTime() < today.getTime();
+    });
 
-    for (const investment of investments) {
+    console.log(`Processing ${pendingInvestments.length} pending investments...`);
+
+    for (const investment of pendingInvestments) {
       const { id, user_id, daily_profit, days_paid } = investment;
 
       // 2. Update user wallet
