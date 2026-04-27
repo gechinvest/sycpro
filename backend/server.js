@@ -94,11 +94,14 @@ app.get('/api/health', async (req, res) => {
       bankColumns = Object.keys(bankCheck[0]);
     } else if (bankError && bankError.message.includes('column')) {
       // If there's a column error, it might give us a hint
-      console.log('Bank accounts schema error:', bankError.message);
+      console.log('Bank accounts schema error detected, attempting automatic reload...');
+      // Try to reload schema automatically via RPC if function exists
+      await supabaseAdmin.rpc('reload_schema').catch(e => console.log('RPC reload_schema failed:', e.message));
     }
 
     res.json({
       status: 'ok',
+      message: 'If you see schema errors, visit /api/fix-schema',
       database: (profileError || bankError) ? 'error' : 'connected',
       profiles_table: profileError ? 'error' : 'exists',
       bank_accounts_table: bankError ? (bankError.message.includes('does not exist') ? 'missing' : 'error') : 'exists',
@@ -109,6 +112,28 @@ app.get('/api/health', async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+// Fix Schema Cache (Automatic/Manual)
+app.get('/api/fix-schema', async (req, res) => {
+  try {
+    const { supabaseAdmin } = require('./config/supabase');
+    
+    // 1. Try automatic reload via NOTIFY if possible (usually needs SQL function)
+    const { error: rpcError } = await supabaseAdmin.rpc('reload_schema');
+    
+    // 2. Try a raw query that might trigger a refresh
+    await supabaseAdmin.from('bank_accounts').select('id').limit(1);
+    
+    res.json({
+      message: 'Schema refresh attempted.',
+      rpc_status: rpcError ? 'Function reload_schema() not found. Please run the manual fix below.' : 'Success',
+      manual_fix: 'If errors persist, go to Supabase SQL Editor and run: NOTIFY pgrst, \'reload schema\';',
+      note: 'This refreshes the API cache for your tables and columns.'
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Error during schema fix', details: err.message });
   }
 });
 

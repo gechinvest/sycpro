@@ -197,6 +197,19 @@ BEGIN
   END IF;
 END $$;
 
+-- 11. Helper Function to Reload Schema Cache (Fix for "column not found" errors)
+CREATE OR REPLACE FUNCTION public.reload_schema()
+RETURNS void AS $$
+BEGIN
+  EXECUTE 'NOTIFY pgrst, ''reload schema''';
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Grant access to the function
+GRANT EXECUTE ON FUNCTION public.reload_schema() TO service_role;
+GRANT EXECUTE ON FUNCTION public.reload_schema() TO anon;
+GRANT EXECUTE ON FUNCTION public.reload_schema() TO authenticated;
+
 -- Enable RLS
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE recharges ENABLE ROW LEVEL SECURITY;

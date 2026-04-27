@@ -244,70 +244,98 @@ exports.buyPlan = async (req, res) => {
 
     // 4. Distribute Referral Commissions (fetch from system settings)
     const distributeCommissions = async () => {
+      console.log(`Starting commission distribution for investment: ${investment.id}, user: ${userId}`);
       try {
         // Fetch current settings for commissions
-        const { data: settings } = await supabaseAdmin
+        const { data: settings, error: settingsError } = await supabaseAdmin
           .from('system_settings')
           .select('referral_reward_percent_l1, referral_reward_percent_l2, referral_reward_percent_l3')
           .eq('id', 'global')
-          .single();
+          .maybeSingle();
+
+        if (settingsError) {
+          console.error('Error fetching system settings for commissions:', settingsError);
+        }
 
         const commissionRates = { 
           1: (settings?.referral_reward_percent_l1 || 10.0) / 100, 
           2: (settings?.referral_reward_percent_l2 || 5.0) / 100, 
           3: (settings?.referral_reward_percent_l3 || 2.0) / 100 
         };
+        
+        console.log('Commission rates applied:', commissionRates);
+        
         let currentUserId = userId;
 
         for (let level = 1; level <= 3; level++) {
           // Get the referrer of the current user
-          const { data: currentUser } = await supabaseAdmin
+          const { data: currentUser, error: userError } = await supabaseAdmin
             .from('profiles')
             .select('referrer_id')
             .eq('id', currentUserId)
             .single();
 
-          if (!currentUser || !currentUser.referrer_id) break;
+          if (userError || !currentUser || !currentUser.referrer_id) {
+            console.log(`No referrer found for level ${level} (currentUser: ${currentUserId})`);
+            break;
+          }
 
           const referrerId = currentUser.referrer_id;
           const commissionAmount = plan.amount * commissionRates[level];
+          
+          console.log(`Level ${level}: Distributing ${commissionAmount} ETB to referrer ${referrerId}`);
 
           // Update Referrer's Wallet
-          const { data: referrerProfile } = await supabaseAdmin
+          const { data: referrerProfile, error: refProfileError } = await supabaseAdmin
             .from('profiles')
             .select('wallet_balance, total_earnings')
             .eq('id', referrerId)
             .single();
 
-          await supabaseAdmin
+          if (refProfileError || !referrerProfile) {
+            console.error(`Referrer profile not found for ID ${referrerId}:`, refProfileError);
+            continue;
+          }
+
+          const { error: updateError } = await supabaseAdmin
             .from('profiles')
             .update({
               wallet_balance: (referrerProfile.wallet_balance || 0) + commissionAmount,
               total_earnings: (referrerProfile.total_earnings || 0) + commissionAmount
             })
             .eq('id', referrerId);
+          
+          if (updateError) {
+            console.error(`Failed to update referrer ${referrerId} wallet:`, updateError);
+          } else {
+            console.log(`Successfully updated wallet for referrer ${referrerId}`);
+          }
 
           // Log in Referrals table
-          await supabaseAdmin.from('referrals').insert({
+          const { error: logError } = await supabaseAdmin.from('referrals').insert({
             referrer_id: referrerId,
             referred_id: userId,
             level: level,
             commission_amount: commissionAmount,
             source_investment_id: investment.id
           });
+          
+          if (logError) console.error('Failed to log referral record:', logError);
 
           // Log in Profit Logs for history
-          await supabaseAdmin.from('profit_logs').insert({
+          const { error: profitError } = await supabaseAdmin.from('profit_logs').insert({
             user_id: referrerId,
             amount: commissionAmount,
             type: 'referral_commission'
           });
+          
+          if (profitError) console.error('Failed to log profit record:', profitError);
 
           // Move up to the next level's referrer
           currentUserId = referrerId;
         }
       } catch (err) {
-        console.error('Commission distribution error:', err);
+        console.error('Commission distribution FATAL error:', err);
       }
     };
 
@@ -450,13 +478,26 @@ exports.getMyReferrals = async (req, res) => {
 // Bank Accounts
 exports.getBankAccounts = async (req, res) => {
   try {
+    // Defensively fetch only known columns or all if schema cache is fixed
     const { data, error } = await supabaseAdmin
       .from('bank_accounts')
-      .select('*')
+      .select('id, bank_name, account_number, is_default, created_at, user_id, account_name')
       .eq('user_id', req.user.id);
-    if (error) throw error;
+    
+    if (error) {
+      console.warn('getBankAccounts column error, attempting fallback select:', error.message);
+      // If specific column fails (like account_name), try without it to at least return some data
+      const { data: fallbackData, error: fallbackError } = await supabaseAdmin
+        .from('bank_accounts')
+        .select('id, bank_name, account_number, is_default, created_at, user_id')
+        .eq('user_id', req.user.id);
+      
+      if (fallbackError) throw fallbackError;
+      return res.json(fallbackData.map(b => ({ ...b, account_name: 'N/A' })));
+    }
     res.json(data);
   } catch (error) {
+    console.error('getBankAccounts Error:', error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -469,22 +510,29 @@ exports.addBankAccount = async (req, res) => {
     // Check if it's the first account to make it default
     const { count } = await supabaseAdmin
       .from('bank_accounts')
-      .select('*', { count: 'exact', head: true })
+      .select('id', { count: 'exact', head: true })
       .eq('user_id', userId);
+
+    const insertData = {
+      user_id: userId,
+      bank_name,
+      account_number,
+      is_default: (count || 0) === 0
+    };
+
+    // Only add account_name if it doesn't cause a schema cache error (though insert usually works)
+    if (account_name) insertData.account_name = account_name;
 
     const { data, error } = await supabaseAdmin
       .from('bank_accounts')
-      .insert({
-        user_id: userId,
-        bank_name,
-        account_name,
-        account_number,
-        is_default: count === 0
-      })
+      .insert(insertData)
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error('addBankAccount Error:', error);
+      throw error;
+    }
     res.status(201).json(data);
   } catch (error) {
     res.status(500).json({ message: error.message });
