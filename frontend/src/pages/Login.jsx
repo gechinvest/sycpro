@@ -40,7 +40,12 @@ const Login = () => {
 
     setLoading(true);
     try {
-      const response = await axios.post(`${import.meta.env.VITE_API_URL}/auth/login`, {
+      const apiUrl = import.meta.env.VITE_API_URL;
+      if (!apiUrl) {
+        throw new Error('API URL is not configured. Please check your environment variables.');
+      }
+      
+      const response = await axios.post(`${apiUrl}/auth/login`, {
         email: `${normalizedPhone}@smartyield.net`, // Map normalized phone to generated email
         password: formData.password
       });

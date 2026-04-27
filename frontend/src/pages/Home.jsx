@@ -41,7 +41,12 @@ const Home = () => {
   useEffect(() => {
     const fetchPlans = async () => {
       try {
-        const response = await axios.get(`${import.meta.env.VITE_API_URL}/investments/plans`);
+        const apiUrl = import.meta.env.VITE_API_URL;
+        if (!apiUrl) {
+          console.warn('VITE_API_URL is not defined');
+          return;
+        }
+        const response = await axios.get(`${apiUrl}/investments/plans`);
         setPlans(response.data);
       } catch (error) {
         console.error('Failed to fetch plans:', error);
@@ -68,8 +73,9 @@ const Home = () => {
 
     if (window.confirm(`Buy ${plan.id.toUpperCase()} for ${plan.amount} ETB?`)) {
       try {
+        const apiUrl = import.meta.env.VITE_API_URL;
         const token = localStorage.getItem('token');
-        await axios.post(`${import.meta.env.VITE_API_URL}/investments/buy-plan`, 
+        await axios.post(`${apiUrl}/investments/buy-plan`, 
           { planId: plan.id },
           { headers: { Authorization: `Bearer ${token}` } }
         );

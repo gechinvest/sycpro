@@ -81,7 +81,7 @@ const Dashboard = () => {
   ];
 
   const menuItems = [
-    { name: 'My Order', icon: <ShoppingBag size={20} />, path: '/roi-history' },
+    { name: 'My Order', icon: <ShoppingBag size={20} />, path: '/transactions' },
     { name: 'Transaction', icon: <Activity size={20} />, path: '/transactions' },
     { name: 'My bank account', icon: <CreditCard size={20} />, path: '/bank-account' },
     { name: 'My team', icon: <Users size={20} />, path: '/referrals' },

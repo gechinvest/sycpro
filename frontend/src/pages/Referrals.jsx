@@ -24,8 +24,10 @@ const Referrals = () => {
   useEffect(() => {
     const fetchReferrals = async () => {
       try {
+        const apiUrl = import.meta.env.VITE_API_URL;
+        if (!apiUrl) return;
         const token = localStorage.getItem('token');
-        const response = await axios.get(`${import.meta.env.VITE_API_URL}/investments/referrals`, {
+        const response = await axios.get(`${apiUrl}/investments/referrals`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         setReferralData(response.data);

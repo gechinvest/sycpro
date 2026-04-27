@@ -12,6 +12,7 @@ const Register = () => {
     referralCode: ''
   });
   const [loading, setLoading] = useState(false);
+  const [referrerName, setReferrerName] = useState('');
   
   const navigate = useNavigate();
   const location = useLocation();
@@ -20,9 +21,25 @@ const Register = () => {
     const params = new URLSearchParams(location.search);
     const ref = params.get('ref');
     if (ref) {
-      setFormData(prev => ({ ...prev, referralCode: ref }));
+      const upperRef = ref.toUpperCase();
+      setFormData(prev => ({ ...prev, referralCode: upperRef }));
+      fetchReferrer(upperRef);
     }
   }, [location]);
+
+  const fetchReferrer = async (code) => {
+    if (!code || code.length < 3) return;
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL || '';
+      const response = await axios.get(`${apiUrl}/auth/referrer/${code}`);
+      if (response.data && response.data.fullName) {
+        setReferrerName(response.data.fullName);
+      }
+    } catch (error) {
+      console.warn('Could not fetch referrer info:', error.message);
+      setReferrerName('');
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -52,6 +69,11 @@ const Register = () => {
 
     setLoading(true);
     try {
+      const apiUrl = import.meta.env.VITE_API_URL;
+      if (!apiUrl) {
+        throw new Error('API URL is not configured. Please check your environment variables.');
+      }
+
       // Generate dummy email and name for backend compatibility
       const submissionData = {
         ...formData,
@@ -60,7 +82,7 @@ const Register = () => {
         fullName: `User ${normalizedPhone.slice(-4)}`
       };
       
-      const response = await axios.post(`${import.meta.env.VITE_API_URL}/auth/register`, submissionData);
+      const response = await axios.post(`${apiUrl}/auth/register`, submissionData);
       toast.success(response.data.message || 'Registration successful! Please log in.');
       navigate('/login', { state: { phone: normalizedPhone } });
     } catch (error) {
@@ -95,6 +117,17 @@ const Register = () => {
         </div>
 
         <div className="bg-secondary-light/30 backdrop-blur-2xl p-8 rounded-[40px] border border-white/5 shadow-2xl">
+          {referrerName && (
+            <div className="mb-6 p-4 bg-primary/10 border border-primary/20 rounded-2xl flex items-center justify-between">
+              <div>
+                <p className="text-[10px] text-primary uppercase font-black tracking-widest mb-1">Invited By</p>
+                <p className="text-white font-bold">{referrerName}</p>
+              </div>
+              <div className="w-10 h-10 bg-primary/20 rounded-full flex items-center justify-center">
+                <Logo size="sm" />
+              </div>
+            </div>
+          )}
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
               <label className="block text-[10px] text-gray-400 uppercase font-black tracking-widest mb-3 ml-1">Phone Number</label>
@@ -134,6 +167,24 @@ const Register = () => {
                   placeholder="••••••••"
                   value={formData.confirmPassword}
                   onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[10px] text-gray-400 uppercase font-black tracking-widest mb-3 ml-1">Referral Code (Optional)</label>
+              <div className="relative group">
+                <input
+                  type="text"
+                  className="w-full bg-black/40 border border-white/5 rounded-2xl p-5 text-white font-bold outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 transition-all placeholder:text-gray-700 uppercase"
+                  placeholder="REFERRAL CODE"
+                  value={formData.referralCode}
+                  onChange={(e) => {
+                    const code = e.target.value.toUpperCase();
+                    setFormData({ ...formData, referralCode: code });
+                    if (code.length >= 6) fetchReferrer(code);
+                    else setReferrerName('');
+                  }}
                 />
               </div>
             </div>

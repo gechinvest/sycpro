@@ -60,26 +60,40 @@ exports.register = async (req, res) => {
       });
     }
 
-    // 3. Update profile with referrer if code provided 
+    // 3. Update profile with referrer if code provided and generate own referral code
     // (The trigger already created the basic profile)
+    const newReferralCode = generateReferralCode();
+    
     if (referralCode) {
+      const normalizedRefCode = referralCode.trim().toUpperCase();
       // Use supabaseAdmin to bypass RLS and find the referrer by their code
       const { data: referrer, error: referrerError } = await supabaseAdmin
         .from('profiles')
         .select('id')
-        .eq('referral_code', referralCode)
+        .eq('referral_code', normalizedRefCode)
         .single();
       
       if (referrer && !referrerError) {
         const { error: updateError } = await supabaseAdmin
           .from('profiles')
-          .update({ referrer_id: referrer.id })
+          .update({ referrer_id: referrer.id, referral_code: newReferralCode })
           .eq('id', authData.user.id);
         
         if (updateError) console.error('Referrer update error:', updateError);
       } else if (referrerError) {
         console.error('Referrer find error:', referrerError);
+        // Still set the new user's referral code even if referrer not found
+        await supabaseAdmin
+          .from('profiles')
+          .update({ referral_code: newReferralCode })
+          .eq('id', authData.user.id);
       }
+    } else {
+      // No referral code provided, just set the new user's referral code
+      await supabaseAdmin
+        .from('profiles')
+        .update({ referral_code: newReferralCode })
+        .eq('id', authData.user.id);
     }
 
     res.status(201).json({ message: 'User registered successfully' });
@@ -188,6 +202,18 @@ exports.login = async (req, res) => {
       return res.status(500).json({ message: 'User authenticated but profile not found.' });
     }
 
+    // Auto-generate referral code if missing (for legacy users)
+    if (!profile.referral_code) {
+      const newCode = generateReferralCode();
+      const { data: updatedProfile } = await supabaseAdmin
+        .from('profiles')
+        .update({ referral_code: newCode })
+        .eq('id', profile.id)
+        .select()
+        .single();
+      if (updatedProfile) profile.referral_code = updatedProfile.referral_code;
+    }
+
     const token = jwt.sign(
       { id: data.user.id, isAdmin: profile.is_admin },
       process.env.JWT_SECRET,
@@ -198,6 +224,25 @@ exports.login = async (req, res) => {
   } catch (error) {
     console.error('Login Controller Error:', error);
     res.status(500).json({ message: error.message || 'Internal Server Error' });
+  }
+};
+
+exports.getReferrerByCode = async (req, res) => {
+  try {
+    const { code } = req.params;
+    const { data: referrer, error } = await supabaseAdmin
+      .from('profiles')
+      .select('full_name')
+      .eq('referral_code', code.toUpperCase())
+      .single();
+
+    if (error || !referrer) {
+      return res.status(404).json({ message: 'Referrer not found' });
+    }
+
+    res.json({ fullName: referrer.full_name });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
   }
 };
 
