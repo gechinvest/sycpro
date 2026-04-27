@@ -24,6 +24,7 @@ const allowedOrigins = [
   process.env.FRONTEND_URL,
   'http://localhost:5180',
   'http://localhost:5181',
+  'http://localhost:5182',
   'http://localhost:5173',
   'https://investmenprofit.vercel.app', // Adding likely Vercel URL
   /\.vercel\.app$/ // Allow any Vercel preview deployment
@@ -76,6 +77,24 @@ app.use('/api/auth', authRoutes);
 app.use('/api/investments', investmentRoutes);
 app.use('/api/admin', adminRoutes);
 
+// Health check endpoint
+app.get('/api/health', async (req, res) => {
+  try {
+    const { supabaseAdmin } = require('./config/supabase');
+    const { data, error } = await supabaseAdmin.from('profiles').select('count', { count: 'exact', head: true });
+    
+    res.json({
+      status: 'ok',
+      database: error ? 'error' : 'connected',
+      profiles_table: error ? 'missing or error' : 'exists',
+      service_role_key: process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.SUPABASE_SERVICE_ROLE_KEY !== 'YOUR_NEW_SERVICE_ROLE_KEY_HERE' ? 'provided' : 'missing',
+      error: error || null
+    });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
 // Root route
 app.get('/', (req, res) => {
   res.send('SYC Capital API is running...');
@@ -83,10 +102,11 @@ app.get('/', (req, res) => {
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  console.error('SERVER ERROR:', err);
   res.status(500).json({ 
-    message: 'Something went wrong!', 
-    error: process.env.NODE_ENV === 'development' ? err.message : 'Internal Server Error' 
+    message: 'Internal Server Error', 
+    details: err.message,
+    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
   });
 });
 

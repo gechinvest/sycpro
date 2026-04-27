@@ -8,17 +8,35 @@ const generateReferralCode = () => {
 
 exports.register = async (req, res) => {
   try {
-    const { fullName, phone, email, password, referralCode } = req.body;
+    let { fullName, phone, email, password, referralCode } = req.body;
+
+    // If no email provided, use phone as a fake email for free authentication
+    if (!email && phone) {
+      email = `${phone}@smartyield.net`;
+    }
+
+    if (!email || !password) {
+      return res.status(400).json({ message: 'Phone/Email and password are required' });
+    }
 
     // 1. Check if user already exists
-    const { data: existingUser } = await supabaseAdmin
+    const { data: existingUser, error: checkError } = await supabaseAdmin
       .from('profiles')
       .select('id')
       .or(`email.eq.${email},phone.eq.${phone}`)
-      .single();
+      .maybeSingle();
+
+    if (checkError && checkError.code !== 'PGRST116') {
+      console.error('Database Check Error:', checkError);
+      return res.status(500).json({ 
+        message: 'Database connection error', 
+        details: checkError.message,
+        hint: 'Check if SUPABASE_SERVICE_ROLE_KEY is correct and "profiles" table exists.'
+      });
+    }
 
     if (existingUser) {
-      return res.status(400).json({ message: 'Email or phone already registered' });
+      return res.status(400).json({ message: 'This phone or email is already registered' });
     }
 
     // 2. Register in Supabase Auth with Metadata
@@ -33,7 +51,14 @@ exports.register = async (req, res) => {
       }
     });
 
-    if (authError) throw authError;
+    if (authError) {
+      console.error('Supabase Auth Error:', authError);
+      return res.status(authError.status || 500).json({ 
+        message: authError.message || 'Authentication service error',
+        details: authError.details || 'Check if Supabase Email Confirmation is disabled in Auth settings.',
+        hint: 'If you see "email rate limit", wait 60 seconds or disable rate limits in Supabase.'
+      });
+    }
 
     // 3. Update profile with referrer if code provided 
     // (The trigger already created the basic profile)
@@ -46,10 +71,12 @@ exports.register = async (req, res) => {
         .single();
       
       if (referrer && !referrerError) {
-        await supabaseAdmin
+        const { error: updateError } = await supabaseAdmin
           .from('profiles')
           .update({ referrer_id: referrer.id })
           .eq('id', authData.user.id);
+        
+        if (updateError) console.error('Referrer update error:', updateError);
       } else if (referrerError) {
         console.error('Referrer find error:', referrerError);
       }
@@ -57,10 +84,10 @@ exports.register = async (req, res) => {
 
     res.status(201).json({ message: 'User registered successfully' });
   } catch (error) {
-    console.error('Registration Error:', error);
+    console.error('Detailed Registration Error:', error);
     res.status(500).json({ 
       message: error.message || 'Internal Server Error',
-      error: process.env.NODE_ENV === 'development' ? error : {}
+      details: error.details || error.hint || 'No additional details available'
     });
   }
 };
@@ -125,7 +152,16 @@ exports.adminRegister = async (req, res) => {
 
 exports.login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    let { email, password, phone } = req.body;
+
+    // Support logging in with phone number by converting to fake email
+    if (!email && phone) {
+      email = `${phone}@smartyield.net`;
+    }
+
+    if (!email) {
+      return res.status(400).json({ message: 'Phone or Email is required' });
+    }
 
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
@@ -134,7 +170,10 @@ exports.login = async (req, res) => {
 
     if (error) {
       console.error('Login Auth Error:', error);
-      return res.status(401).json({ message: error.message || 'Invalid credentials' });
+      return res.status(401).json({ 
+        message: error.message || 'Invalid credentials',
+        hint: 'If you just registered, ensure "Confirm Email" is DISABLED in Supabase > Auth > Settings.'
+      });
     }
 
     // Get profile info - Use supabaseAdmin to bypass RLS since the anon client doesn't have a user session yet

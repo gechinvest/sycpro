@@ -1,6 +1,10 @@
 -- SmartYield Capital Supabase Schema - CLEAN RESET SCRIPT
 
 -- Drop existing tables if they exist (to clear any broken state)
+DROP TABLE IF EXISTS deposit_methods CASCADE;
+DROP TABLE IF EXISTS system_settings CASCADE;
+DROP TABLE IF EXISTS withdrawals CASCADE;
+DROP TABLE IF EXISTS bank_accounts CASCADE;
 DROP TABLE IF EXISTS profit_logs CASCADE;
 DROP TABLE IF EXISTS referrals CASCADE;
 DROP TABLE IF EXISTS investments CASCADE;
@@ -9,7 +13,7 @@ DROP TABLE IF EXISTS investment_plans CASCADE;
 DROP TABLE IF EXISTS profiles CASCADE;
 
 -- 1. Users Table
-CREATE TABLE profiles (
+CREATE TABLE IF NOT EXISTS profiles (
     id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
     full_name TEXT NOT NULL,
     phone TEXT UNIQUE NOT NULL,
@@ -24,7 +28,7 @@ CREATE TABLE profiles (
 );
 
 -- 2. Investment Plans
-CREATE TABLE investment_plans (
+CREATE TABLE IF NOT EXISTS investment_plans (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     amount DECIMAL(12, 2) NOT NULL,
@@ -43,10 +47,13 @@ INSERT INTO investment_plans (id, name, amount) VALUES
 ('v7', 'Plan V7', 15000),
 ('v8', 'Plan V8', 50000),
 ('v9', 'Plan V9', 100000),
-('v10', 'Plan V10', 200000);
+('v10', 'Plan V10', 200000)
+ON CONFLICT (id) DO UPDATE SET 
+    name = EXCLUDED.name,
+    amount = EXCLUDED.amount;
 
 -- 3. Recharge (Deposit) Requests
-CREATE TABLE recharges (
+CREATE TABLE IF NOT EXISTS recharges (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
     amount DECIMAL(12, 2) NOT NULL,
@@ -62,7 +69,7 @@ CREATE TABLE recharges (
 );
 
 -- 4. Active Investments
-CREATE TABLE investments (
+CREATE TABLE IF NOT EXISTS investments (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
     plan_id TEXT REFERENCES investment_plans(id),
@@ -75,7 +82,7 @@ CREATE TABLE investments (
 );
 
 -- 5. Referrals and Commissions
-CREATE TABLE referrals (
+CREATE TABLE IF NOT EXISTS referrals (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     referrer_id UUID REFERENCES profiles(id),
     referred_id UUID REFERENCES profiles(id),
@@ -86,7 +93,7 @@ CREATE TABLE referrals (
 );
 
 -- 6. Profit Logs (ROI History)
-CREATE TABLE profit_logs (
+CREATE TABLE IF NOT EXISTS profit_logs (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
     investment_id UUID REFERENCES investments(id) ON DELETE CASCADE,
@@ -96,7 +103,7 @@ CREATE TABLE profit_logs (
 );
 
 -- 7. Bank Accounts
-CREATE TABLE bank_accounts (
+CREATE TABLE IF NOT EXISTS bank_accounts (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
     bank_name TEXT NOT NULL,
@@ -107,7 +114,7 @@ CREATE TABLE bank_accounts (
 );
 
 -- 8. Withdrawal Requests
-CREATE TABLE withdrawals (
+CREATE TABLE IF NOT EXISTS withdrawals (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
     amount DECIMAL(12, 2) NOT NULL,
@@ -122,7 +129,7 @@ CREATE TABLE withdrawals (
 );
 
 -- 9. System Settings
-CREATE TABLE system_settings (
+CREATE TABLE IF NOT EXISTS system_settings (
     id TEXT PRIMARY KEY DEFAULT 'global',
     withdrawal_fee_percent DECIMAL DEFAULT 2.0,
     min_withdrawal_amount DECIMAL DEFAULT 400,
@@ -142,7 +149,7 @@ VALUES ('global', 2.0, 400, 3.0, 10.0, 5.0, 2.0)
 ON CONFLICT (id) DO NOTHING;
 
 -- 10. Deposit Methods
-CREATE TABLE deposit_methods (
+CREATE TABLE IF NOT EXISTS deposit_methods (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     slug TEXT UNIQUE NOT NULL,
     name TEXT NOT NULL,
@@ -163,6 +170,33 @@ VALUES
 ('sample_bank', 'Sample Bank', '1234567890', 'Sample Admin')
 ON CONFLICT (slug) DO NOTHING;
 
+-- Trigger for automatic profile creation
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.profiles (id, full_name, phone, email, referral_code, is_admin)
+  VALUES (
+    NEW.id,
+    COALESCE(NEW.raw_user_meta_data->>'full_name', 'User'),
+    COALESCE(NEW.raw_user_meta_data->>'phone', '0000000000'),
+    NEW.email,
+    UPPER(SUBSTRING(REPLACE(gen_random_uuid()::text, '-', ''), 1, 6)),
+    COALESCE((NEW.raw_user_meta_data->>'is_admin')::boolean, FALSE)
+  );
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Check if trigger exists and create if not
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'on_auth_user_created') THEN
+    CREATE TRIGGER on_auth_user_created
+      AFTER INSERT ON auth.users
+      FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+  END IF;
+END $$;
+
 -- Enable RLS
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE recharges ENABLE ROW LEVEL SECURITY;
@@ -172,6 +206,7 @@ ALTER TABLE profit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bank_accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE withdrawals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE system_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE investment_plans ENABLE ROW LEVEL SECURITY;
 ALTER TABLE deposit_methods ENABLE ROW LEVEL SECURITY;
 
 -- Grant Permissions
@@ -179,6 +214,23 @@ GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
 
 -- Policies
+-- Drop existing policies to avoid conflict
+DO $$ 
+BEGIN
+    DROP POLICY IF EXISTS "Users can view their own profile" ON profiles;
+    DROP POLICY IF EXISTS "Users can update their own profile" ON profiles;
+    DROP POLICY IF EXISTS "Users can view their own recharges" ON recharges;
+    DROP POLICY IF EXISTS "Users can view their own investments" ON investments;
+    DROP POLICY IF EXISTS "Users can view their own referrals" ON referrals;
+    DROP POLICY IF EXISTS "Users can view their own profit logs" ON profit_logs;
+    DROP POLICY IF EXISTS "Users can view their own bank accounts" ON bank_accounts;
+    DROP POLICY IF EXISTS "Users can view their own withdrawals" ON withdrawals;
+    DROP POLICY IF EXISTS "Public can view settings" ON system_settings;
+    DROP POLICY IF EXISTS "Anyone can view active deposit methods" ON deposit_methods;
+    DROP POLICY IF EXISTS "Admins can view all recharges" ON recharges;
+    DROP POLICY IF EXISTS "Admins can view all profiles" ON profiles;
+END $$;
+
 CREATE POLICY "Users can view their own profile" ON profiles FOR SELECT USING (auth.uid() = id);
 CREATE POLICY "Users can update their own profile" ON profiles FOR UPDATE USING (auth.uid() = id);
 CREATE POLICY "Users can view their own recharges" ON recharges FOR SELECT USING (auth.uid() = user_id);

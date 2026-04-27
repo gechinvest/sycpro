@@ -6,7 +6,11 @@ const supabaseKey = process.env.SUPABASE_ANON_KEY;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
-  throw new Error('Supabase URL and Key are required');
+  throw new Error('Supabase URL and Anon Key are required');
+}
+
+if (!supabaseServiceKey || supabaseServiceKey === 'YOUR_NEW_SERVICE_ROLE_KEY_HERE') {
+  console.warn('WARNING: SUPABASE_SERVICE_ROLE_KEY is missing or not set. Admin functions will fail.');
 }
 
 // Client for regular user operations

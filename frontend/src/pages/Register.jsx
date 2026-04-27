@@ -65,8 +65,13 @@ const Register = () => {
       navigate('/login', { state: { phone: normalizedPhone } });
     } catch (error) {
       console.error('Registration error details:', error);
-      const errorMsg = error.response?.data?.message || error.message || 'Registration failed';
-      toast.error(errorMsg);
+      const errorData = error.response?.data;
+      const errorMsg = errorData?.message || error.message || 'Registration failed';
+      const errorDetails = errorData?.details ? `\nDetails: ${errorData.details}` : '';
+      
+      toast.error(`${errorMsg}${errorDetails}`, {
+        autoClose: 10000 // Keep visible longer
+      });
     } finally {
       setLoading(false);
     }
