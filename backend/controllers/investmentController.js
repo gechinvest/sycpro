@@ -372,30 +372,59 @@ exports.getMyReferrals = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const fetchLevel = async (referrerIds) => {
+    const fetchLevelData = async (referrerIds) => {
+      if (!referrerIds || (Array.isArray(referrerIds) && referrerIds.length === 0)) {
+        return [];
+      }
+
+      const ids = Array.isArray(referrerIds) ? referrerIds : [referrerIds];
+      
       const { data, error } = await supabaseAdmin
         .from('profiles')
-        .select('id, full_name, phone, created_at, wallet_balance')
-        .in('referrer_id', Array.isArray(referrerIds) ? referrerIds : [referrerIds]);
-      if (error) throw error;
-      return data;
+        .select(`
+          id, 
+          full_name, 
+          phone, 
+          created_at, 
+          wallet_balance,
+          investments!investments_user_id_fkey (id, is_active)
+        `)
+        .in('referrer_id', ids);
+      
+      if (error) {
+        console.error('Fetch Level Error:', error);
+        throw error;
+      }
+
+      // Map data to include is_active based on if they have any active investment
+      return (data || []).map(profile => {
+        const activeInvestments = profile.investments || [];
+        const isActive = activeInvestments.some(inv => inv.is_active === true);
+        
+        // Remove the raw investments data before sending to frontend
+        const { investments, ...profileData } = profile;
+        return {
+          ...profileData,
+          is_active: isActive
+        };
+      });
     };
 
     // 1. Fetch Level 1
-    const level1 = await fetchLevel(userId);
+    const level1 = await fetchLevelData(userId);
     const level1Ids = level1.map(u => u.id);
 
     // 2. Fetch Level 2
     let level2 = [];
     if (level1Ids.length > 0) {
-      level2 = await fetchLevel(level1Ids);
+      level2 = await fetchLevelData(level1Ids);
     }
     const level2Ids = level2.map(u => u.id);
 
     // 3. Fetch Level 3
     let level3 = [];
     if (level2Ids.length > 0) {
-      level3 = await fetchLevel(level2Ids);
+      level3 = await fetchLevelData(level2Ids);
     }
 
     res.json({
@@ -410,8 +439,11 @@ exports.getMyReferrals = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Get My Referrals Error:', error);
-    res.status(500).json({ message: error.message });
+    console.error('Detailed Get My Referrals Error:', error);
+    res.status(500).json({ 
+      message: 'Failed to load referral data', 
+      details: error.message 
+    });
   }
 };
 
@@ -652,11 +684,20 @@ exports.getDashboardStats = async (req, res) => {
       .eq('type', 'referral_commission');
     const teamIncome = (teamProfits || []).reduce((sum, p) => sum + parseFloat(p.amount), 0);
 
-    // 5. Get Team Size (Level 1 only for dashboard quick view)
-    const { count: teamSize } = await supabaseAdmin
-      .from('profiles')
-      .select('*', { count: 'exact', head: true })
-      .eq('referrer_id', userId);
+    // 5. Get Total Team Size (All 3 levels)
+    const getTeamSize = async (referrerIds) => {
+      if (!referrerIds || (Array.isArray(referrerIds) && referrerIds.length === 0)) return [];
+      const { data } = await supabaseAdmin
+        .from('profiles')
+        .select('id')
+        .in('referrer_id', Array.isArray(referrerIds) ? referrerIds : [referrerIds]);
+      return (data || []).map(u => u.id);
+    };
+
+    const l1Ids = await getTeamSize(userId);
+    const l2Ids = await getTeamSize(l1Ids);
+    const l3Ids = await getTeamSize(l2Ids);
+    const totalTeamSize = l1Ids.length + l2Ids.length + l3Ids.length;
 
     res.json({
       walletBalance: profile?.wallet_balance || 0,
@@ -664,7 +705,7 @@ exports.getDashboardStats = async (req, res) => {
       totalRecharge,
       totalWithdraw,
       teamIncome,
-      teamSize: teamSize || 0
+      teamSize: totalTeamSize
     });
   } catch (error) {
     console.error('Get Dashboard Stats Error:', error);

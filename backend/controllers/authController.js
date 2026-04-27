@@ -60,40 +60,64 @@ exports.register = async (req, res) => {
       });
     }
 
-    // 3. Update profile with referrer if code provided and generate own referral code
-    // (The trigger already created the basic profile)
+    // 3. Ensure profile exists and update with referrer if code provided
+    // Sometimes the Supabase trigger is slow, so we check and create if missing
+    let { data: profile, error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .select('*')
+      .eq('id', authData.user.id)
+      .single();
+
     const newReferralCode = generateReferralCode();
-    
-    if (referralCode) {
-      const normalizedRefCode = referralCode.trim().toUpperCase();
-      // Use supabaseAdmin to bypass RLS and find the referrer by their code
-      const { data: referrer, error: referrerError } = await supabaseAdmin
+
+    if (profileError || !profile) {
+      console.log('Profile not found after registration, creating manually:', authData.user.id);
+      const { data: newProfile, error: createError } = await supabaseAdmin
         .from('profiles')
-        .select('id')
-        .eq('referral_code', normalizedRefCode)
+        .insert({
+          id: authData.user.id,
+          email: authData.user.email,
+          full_name: fullName || authData.user.user_metadata?.full_name || 'User',
+          phone: phone || authData.user.user_metadata?.phone || '',
+          referral_code: newReferralCode
+        })
+        .select()
         .single();
       
-      if (referrer && !referrerError) {
-        const { error: updateError } = await supabaseAdmin
-          .from('profiles')
-          .update({ referrer_id: referrer.id, referral_code: newReferralCode })
-          .eq('id', authData.user.id);
-        
-        if (updateError) console.error('Referrer update error:', updateError);
-      } else if (referrerError) {
-        console.error('Referrer find error:', referrerError);
-        // Still set the new user's referral code even if referrer not found
-        await supabaseAdmin
-          .from('profiles')
-          .update({ referral_code: newReferralCode })
-          .eq('id', authData.user.id);
+      if (createError) {
+        console.error('Failed to create manual profile during registration:', createError);
+        // We continue anyway, maybe it will work on next try
+      } else {
+        profile = newProfile;
       }
-    } else {
-      // No referral code provided, just set the new user's referral code
-      await supabaseAdmin
+    }
+
+    // Now handle the referrer link if we have a profile
+    if (profile) {
+      let updateData = { referral_code: newReferralCode };
+      
+      if (referralCode) {
+        const normalizedRefCode = referralCode.trim().toUpperCase();
+        const { data: referrer, error: referrerError } = await supabaseAdmin
+          .from('profiles')
+          .select('id')
+          .eq('referral_code', normalizedRefCode)
+          .single();
+        
+        if (referrer && !referrerError) {
+          updateData.referrer_id = referrer.id;
+          console.log(`Linking user ${authData.user.id} to referrer ${referrer.id}`);
+        } else {
+          console.log(`Referrer not found for code: ${normalizedRefCode}`);
+        }
+      }
+
+      const { error: finalUpdateError } = await supabaseAdmin
         .from('profiles')
-        .update({ referral_code: newReferralCode })
+        .update(updateData)
         .eq('id', authData.user.id);
+      
+      if (finalUpdateError) console.error('Final profile update error:', finalUpdateError);
     }
 
     res.status(201).json({ message: 'User registered successfully' });
