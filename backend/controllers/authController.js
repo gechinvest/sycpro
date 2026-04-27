@@ -199,7 +199,14 @@ exports.login = async (req, res) => {
 
     if (profileError) {
       console.error('Profile Fetch Error:', profileError);
-      return res.status(500).json({ message: 'User authenticated but profile not found.' });
+      if (profileError.code === 'PGRST116') {
+        return res.status(404).json({ message: 'User profile not found. Please register again.' });
+      }
+      return res.status(500).json({ 
+        message: 'Failed to fetch user profile',
+        details: profileError.message,
+        hint: 'Check if SUPABASE_SERVICE_ROLE_KEY is set correctly and "profiles" table exists.'
+      });
     }
 
     // Auto-generate referral code if missing (for legacy users)
