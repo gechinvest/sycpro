@@ -60,43 +60,31 @@ exports.getWithdrawals = async (req, res) => {
     console.log('Fetching all withdrawals...');
     const { data, error } = await supabaseAdmin
       .from('withdrawals')
-      .select('*, profiles(full_name, phone, wallet_balance), bank_accounts(*)')
+      .select('*, profiles(full_name, phone, wallet_balance)')
       .order('submitted_at', { ascending: false });
 
     if (error) {
-      console.log('getWithdrawals join failed or table missing:', error.message);
-      
-      const { data: withdrawals, error: wError } = await supabaseAdmin
-        .from('withdrawals')
-        .select('*')
-        .order('submitted_at', { ascending: false });
-
-      if (wError) {
-        console.warn('withdrawals table might not exist:', wError.message);
-        return res.json([]);
-      }
-
-      const userIds = [...new Set(withdrawals.map(w => w.user_id))];
-      const bankIds = [...new Set(withdrawals.map(w => w.bank_account_id).filter(Boolean))];
-
-      const [{ data: profiles, error: pError }, { data: banks, error: bError }] = await Promise.all([
-        supabaseAdmin.from('profiles').select('id, full_name, phone, wallet_balance').in('id', userIds),
-        supabaseAdmin.from('bank_accounts').select('*').in('id', bankIds)
-      ]);
-
-      if (pError) console.warn('profiles fetch failed for withdrawals:', pError.message);
-      if (bError) console.warn('banks fetch failed for withdrawals:', bError.message);
-
-      const merged = withdrawals.map(w => ({
-        ...w,
-        profiles: profiles?.find(p => p.id === w.user_id) || null,
-        bank_accounts: banks?.find(b => b.id === w.bank_account_id) || null
-      }));
-
-      return res.json(merged);
+      console.log('getWithdrawals fetch failed:', error.message);
+      return res.json([]);
     }
 
-    res.json(data || []);
+    // Fetch bank accounts separately to avoid join errors if schema is stale
+    const bankIds = [...new Set(data.map(w => w.bank_account_id).filter(Boolean))];
+    const { data: banks, error: bError } = await supabaseAdmin
+      .from('bank_accounts')
+      .select('*')
+      .in('id', bankIds);
+
+    if (bError) {
+      console.warn('banks fetch failed for withdrawals:', bError.message);
+    }
+
+    const merged = data.map(w => ({
+      ...w,
+      bank_accounts: banks?.find(b => b.id === w.bank_account_id) || null
+    }));
+
+    res.json(merged);
   } catch (error) {
     console.error('getWithdrawals Exception:', error.message);
     res.json([]);

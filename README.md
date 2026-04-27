@@ -48,6 +48,25 @@ A professional, full-stack investment platform built with React, Node.js, and Su
 
 ### 3. Running the App
 - Run the fully functional app with a single command: `npm start`.
+
+## 🆘 Troubleshooting
+
+### 1. "Could not find the 'account_name' column of 'bank_accounts' in the schema cache"
+This error happens when the Supabase API cache is stale. 
+**Fix:**
+1. Go to your [Supabase Dashboard](https://supabase.com/dashboard).
+2. Go to the **SQL Editor**.
+3. Run the following command:
+   ```sql
+   NOTIFY pgrst, 'reload schema';
+   ```
+4. This will refresh the API cache and the error should disappear.
+
+### 2. Login 404 Error
+If you get a 404 error during login on Vercel:
+- Ensure your `VITE_API_URL` in Vercel ends with `/api` (e.g., `https://your-backend.vercel.app/api`).
+- Check that you have deployed the backend correctly with the provided `vercel.json` files.
+
 - This will install all dependencies and start both backend and frontend.
 
 ### 4. ROI Automation

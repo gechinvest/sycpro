@@ -81,14 +81,31 @@ app.use('/api/admin', adminRoutes);
 app.get('/api/health', async (req, res) => {
   try {
     const { supabaseAdmin } = require('./config/supabase');
-    const { data, error } = await supabaseAdmin.from('profiles').select('count', { count: 'exact', head: true });
     
+    // Check profiles table
+    const { data: profileCheck, error: profileError } = await supabaseAdmin.from('profiles').select('count', { count: 'exact', head: true });
+    
+    // Check bank_accounts table schema
+    const { data: bankCheck, error: bankError } = await supabaseAdmin.from('bank_accounts').select('*').limit(1);
+    
+    // Get column names if bankCheck exists
+    let bankColumns = [];
+    if (bankCheck && bankCheck.length > 0) {
+      bankColumns = Object.keys(bankCheck[0]);
+    } else if (bankError && bankError.message.includes('column')) {
+      // If there's a column error, it might give us a hint
+      console.log('Bank accounts schema error:', bankError.message);
+    }
+
     res.json({
       status: 'ok',
-      database: error ? 'error' : 'connected',
-      profiles_table: error ? 'missing or error' : 'exists',
+      database: (profileError || bankError) ? 'error' : 'connected',
+      profiles_table: profileError ? 'error' : 'exists',
+      bank_accounts_table: bankError ? (bankError.message.includes('does not exist') ? 'missing' : 'error') : 'exists',
+      bank_accounts_columns: bankColumns,
+      bank_error_details: bankError ? bankError.message : null,
       service_role_key: process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.SUPABASE_SERVICE_ROLE_KEY !== 'YOUR_NEW_SERVICE_ROLE_KEY_HERE' ? 'provided' : 'missing',
-      error: error || null
+      profile_error: profileError || null
     });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
