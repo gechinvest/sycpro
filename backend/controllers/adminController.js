@@ -216,63 +216,81 @@ const handleReferrals = async (userId, amount, investmentId) => {
       .eq('id', 'global')
       .single();
 
-    const levels = [
+    const commissionRates = [
       (settings?.referral_reward_percent_l1 || 10.0) / 100,
       (settings?.referral_reward_percent_l2 || 5.0) / 100,
       (settings?.referral_reward_percent_l3 || 2.0) / 100
     ];
     let currentUserId = userId;
 
-    for (let i = 0; i < levels.length; i++) {
-    // Get referrer
-    const { data: user } = await supabaseAdmin
-      .from('profiles')
-      .select('referrer_id')
-      .eq('id', currentUserId)
-      .single();
+    for (let i = 0; i < commissionRates.length; i++) {
+      // Get referrer
+      const { data: user, error: userError } = await supabaseAdmin
+        .from('profiles')
+        .select('referrer_id')
+        .eq('id', currentUserId)
+        .single();
 
-    if (!user || !user.referrer_id) break;
+      if (userError || !user || !user.referrer_id) {
+        console.log(`Referral chain ended at level ${i+1} for user ${currentUserId}`);
+        break;
+      }
 
-    const referrerId = user.referrer_id;
-    const commission = amount * levels[i];
+      const referrerId = user.referrer_id;
+      const commission = amount * commissionRates[i];
 
-    // Update referrer wallet and total earnings
-    const { data: referrer } = await supabaseAdmin
+      console.log(`Distributing Level ${i+1} commission (${commission} ETB) to referrer ${referrerId}`);
+
+      // Update referrer wallet and total earnings
+      const { data: referrer, error: refError } = await supabaseAdmin
         .from('profiles')
         .select('wallet_balance, total_earnings')
         .eq('id', referrerId)
         .single();
 
-    await supabaseAdmin
-      .from('profiles')
-      .update({
-        wallet_balance: (referrer.wallet_balance || 0) + commission,
-        total_earnings: (referrer.total_earnings || 0) + commission,
-      })
-      .eq('id', referrerId);
+      if (refError || !referrer) {
+        console.warn(`Could not find referrer profile ${referrerId}, skipping level ${i+1}`);
+        continue;
+      }
 
-    // Log referral
-    await supabaseAdmin
-      .from('referrals')
-      .insert({
-        referrer_id: referrerId,
-        referred_id: userId,
-        level: i + 1,
-        commission_amount: commission,
-        source_investment_id: investmentId,
-      });
+      const { error: updateError } = await supabaseAdmin
+        .from('profiles')
+        .update({
+          wallet_balance: (referrer.wallet_balance || 0) + commission,
+          total_earnings: (referrer.total_earnings || 0) + commission,
+        })
+        .eq('id', referrerId);
 
-    // Also log to profit_logs for transaction history
-    await supabaseAdmin
-      .from('profit_logs')
-      .insert({
-        user_id: referrerId,
-        amount: commission,
-        type: 'referral_commission',
-        metadata: { referred_user_id: userId, level: i + 1 }
-      });
+      if (updateError) {
+        console.error(`Failed to update wallet for referrer ${referrerId}:`, updateError.message);
+      }
 
-    currentUserId = referrerId;
+      // Log referral record
+      const { error: logError } = await supabaseAdmin
+        .from('referrals')
+        .insert({
+          referrer_id: referrerId,
+          referred_id: userId,
+          level: i + 1,
+          commission_amount: commission,
+          source_investment_id: investmentId,
+        });
+
+      if (logError) console.warn(`Failed to log referral record for ${referrerId}:`, logError.message);
+
+      // Log to profit_logs for transaction history
+      const { error: profitError } = await supabaseAdmin
+        .from('profit_logs')
+        .insert({
+          user_id: referrerId,
+          amount: commission,
+          type: 'referral_commission',
+          metadata: { referred_user_id: userId, level: i + 1 }
+        });
+
+      if (profitError) console.warn(`Failed to log profit record for ${referrerId}:`, profitError.message);
+
+      currentUserId = referrerId;
     }
   } catch (error) {
     console.error('handleReferrals error:', error.message);
